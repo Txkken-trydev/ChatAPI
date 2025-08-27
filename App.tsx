@@ -6,8 +6,8 @@ function App() {
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const API_URL = "http://localhost:3001/api/v1/workspace/bot/chat"; // slug = "bot"
-  const API_KEY = "MVF317H-WMV4Q7G-MVWDA1N-TVEZ2G7"; // asegúrate de poner la tuya y que esté con "Bearer "
+  const API_URL = "http://localhost:3001/api/v1/workspace/<slugname>/chat"; // slug = "bot"
+  const API_KEY = ""; // asegúrate de poner la tuya y que esté con "Bearer "
 
   const sendQuery = async () => {
     if (!prompt.trim()) return;
