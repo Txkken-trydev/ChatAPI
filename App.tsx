@@ -1,52 +1,132 @@
 import { useState } from "react";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 
-function App() {
+// Ajusta estos valores a tu entorno
+const WORKSPACE_SLUG = "";
+const API_BASE = "http://localhost:3001/api/v1"; // 👈 solo hasta /api/v1
+const API_KEY = "Bearer ";
+
+// Cliente Axios
+const api = axios.create({
+  baseURL: API_BASE,
+  timeout: 60000,
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: API_KEY,
+  },
+});
+
+// Traductor de errores
+function describeAxiosError(err: unknown) {
+  const e = err as AxiosError<any>;
+  if (e.request && !e.response) {
+    if (e.code === "ECONNABORTED") {
+      return {
+        title: "Timeout",
+        hint: "El servidor tardó demasiado en responder.",
+        details: e.message,
+      };
+    }
+    if (e.message?.includes("Network Error")) {
+      return {
+        title: "Network Error",
+        hint:
+          "Posible CORS o servidor caído. Si ves 'blocked by CORS', usa un proxy de Vite o habilita CORS en el servidor.",
+        details: e.message,
+      };
+    }
+    return {
+      title: "Sin respuesta del servidor",
+      hint: "Revisa que AnythingLLM esté vivo en el puerto correcto.",
+      details: e.message,
+    };
+  }
+
+  if (e.response) {
+    const { status, data } = e.response;
+    let title = `HTTP ${status}`;
+    let hint = "Error desconocido";
+    switch (status) {
+      case 401:
+        title = "401 Unauthorized";
+        hint = "API Key inválida o falta 'Bearer'.";
+        break;
+      case 403:
+        title = "403 Forbidden";
+        hint = "Tu API Key no tiene permisos o la Developer API está apagada.";
+        break;
+      case 404:
+        title = "404 Not Found";
+        hint = "Verifica el slug del workspace y el endpoint.";
+        break;
+      case 429:
+        title = "429 Rate Limited";
+        hint = "Demasiadas peticiones.";
+        break;
+      case 500:
+      case 502:
+      case 503:
+      case 504:
+        title = `Error del servidor (${status})`;
+        hint = "Revisa logs de AnythingLLM.";
+        break;
+    }
+    return {
+      title,
+      hint,
+      details:
+        typeof data === "string" ? data : JSON.stringify(data, null, 2),
+    };
+  }
+
+  return {
+    title: "Error desconocido",
+    hint: "No parece ser error HTTP o de red.",
+    details: (e as any).message || String(e),
+  };
+}
+
+export default function App() {
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const API_URL = "http://localhost:3001/api/v1/workspace/<slugname>/chat"; // slug = "bot"
-  const API_KEY = ""; // asegúrate de poner la tuya y que esté con "Bearer "
+  const [diag, setDiag] = useState<{
+    title: string;
+    hint: string;
+    details: string;
+  } | null>(null);
 
   const sendQuery = async () => {
     if (!prompt.trim()) return;
     setLoading(true);
     setResponse("");
+    setDiag(null);
 
     try {
-      const res = await axios.post(
-        API_URL,
-        { message: prompt },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${API_KEY}`,
-          },
-        }
-      );
+      const res = await api.post(`/workspace/${WORKSPACE_SLUG}/chat`, {
+        message: prompt,
+        mode: "chat",
+      });
 
-      setResponse(res.data.textResponse || "No se encontró respuesta.");
+      console.log("Respuesta cruda:", res.data);
+
+      // Auto-detección del campo que trae la respuesta
+      const respuesta =
+        res.data.textResponse ||
+        res.data.response ||
+        res.data.answer ||
+        res.data.message ||
+        "⚠️ No se encontró respuesta en el payload.";
+
+      setResponse(respuesta);
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        const data = error.response?.data;
-
-        if (status === 401) {
-          setResponse("⚠️ 401 Unauthorized\nAPI Key incorrecta o falta el 'Bearer'.");
-        } else if (status === 403) {
-          setResponse("⚠️ 403 Forbidden\nLa API Key no tiene permisos o la Developer API está deshabilitada.");
-        } else if (status === 404) {
-          setResponse("⚠️ 404 Not Found\nEndpoint o workspace incorrecto. Verifica el slug del workspace.");
-        } else {
-          setResponse(`⚠️ Error ${status || "desconocido"}\n${JSON.stringify(data, null, 2)}`);
-        }
-      } else {
-        setResponse("❌ Error inesperado: " + error.message);
-      }
+      const info = describeAxiosError(error);
+      console.error("[AnythingLLM error]", info);
+      setDiag(info);
+      setResponse("Error al conectar con AnythingLLM.");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -78,9 +158,22 @@ function App() {
             <p className="whitespace-pre-line">{response}</p>
           )}
         </div>
+
+        {diag && (
+          <div className="mt-4 p-3 border rounded-lg bg-red-50">
+            <p className="font-semibold text-red-700">⚠️ {diag.title}</p>
+            <p className="text-red-800 text-sm mt-1">{diag.hint}</p>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm text-red-700">
+                Ver detalles técnicos
+              </summary>
+              <pre className="text-xs mt-2 overflow-auto max-h-48">
+                {diag.details}
+              </pre>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-export default App;
